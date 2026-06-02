@@ -1,0 +1,273 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   NexusVote — Theme tokens
+   -----------------------------------------------------------------------------
+   Modern futuristic SaaS palette: deep indigo + purple gradients on a near-black
+   canvas in dark mode, soft glass white on indigo wash in light mode.
+   The token *names* (--primary, --gold, etc.) are kept identical to the previous
+   theme so the rest of the codebase doesn't need wholesale renaming — only the
+   *colour values* change.
+   ============================================================================= */
+
+@layer base {
+  :root {
+    /* Light mode — soft indigo wash with crisp white glass surfaces */
+    --background: 230 40% 98%;
+    --foreground: 240 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 30% 12%;
+
+    /* Primary = deep indigo / violet, with the "gold" slot repurposed as an
+       electric purple accent so existing components still find a hue. */
+    --primary: 248 75% 56%;
+    --primary-foreground: 230 40% 98%;
+
+    --secondary: 235 35% 95%;
+    --secondary-foreground: 240 30% 12%;
+
+    --muted: 235 30% 94%;
+    --muted-foreground: 240 12% 40%;
+
+    --accent: 280 78% 60%;
+    --accent-foreground: 230 40% 98%;
+    --gold: 280 78% 60%; /* legacy slot kept; now a purple accent */
+    --gold-foreground: 230 40% 98%;
+
+    --success: 156 72% 42%;
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 235 25% 88%;
+    --input: 235 25% 88%;
+    --ring: 248 80% 62%;
+
+    --radius: 0.85rem;
+
+    --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-serif: "Sora", "Inter", system-ui, sans-serif; /* serif slot now a modern display sans */
+
+    /* Brand gradient — referenced by glass utilities and gradient buttons. */
+    --grad-from: 248 75% 56%;
+    --grad-via:  268 75% 58%;
+    --grad-to:   288 78% 60%;
+  }
+
+  .dark {
+    /* Dark mode — charcoal/black canvas with neon indigo+purple glow */
+    --background: 240 22% 6%;
+    --foreground: 230 30% 96%;
+
+    --card: 240 22% 9%;
+    --card-foreground: 230 30% 96%;
+
+    --popover: 240 22% 9%;
+    --popover-foreground: 230 30% 96%;
+
+    --primary: 248 88% 68%;
+    --primary-foreground: 240 25% 8%;
+
+    --secondary: 240 18% 14%;
+    --secondary-foreground: 230 30% 96%;
+
+    --muted: 240 18% 14%;
+    --muted-foreground: 235 12% 65%;
+
+    --accent: 280 90% 70%;
+    --accent-foreground: 240 25% 8%;
+    --gold: 280 90% 70%;
+    --gold-foreground: 240 25% 8%;
+
+    --success: 156 70% 52%;
+    --success-foreground: 240 25% 8%;
+
+    --destructive: 0 75% 62%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 18% 20%;
+    --input: 240 18% 18%;
+    --ring: 248 88% 68%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* =============================================================================
+   Global app background — kept under the original `gov-bg` class name so the
+   layout doesn't need to be updated. It is now a futuristic indigo aurora:
+     - radial gradient orbs (indigo + purple) bleeding from corners
+     - a faint grid overlay for the "AI dashboard" texture
+   ============================================================================= */
+.gov-bg {
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(closest-side at 12% -10%, hsl(var(--grad-from) / 0.22), transparent 65%),
+    radial-gradient(closest-side at 90% 5%, hsl(var(--grad-to) / 0.18), transparent 60%),
+    radial-gradient(closest-side at 50% 110%, hsl(var(--grad-via) / 0.18), transparent 55%),
+    linear-gradient(hsl(var(--primary) / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--primary) / 0.04) 1px, transparent 1px);
+  background-size: auto, auto, auto, 32px 32px, 32px 32px;
+  background-attachment: fixed, fixed, fixed, fixed, fixed;
+}
+.dark .gov-bg {
+  background-image:
+    radial-gradient(closest-side at 12% -10%, hsl(var(--grad-from) / 0.30), transparent 65%),
+    radial-gradient(closest-side at 90% 5%, hsl(var(--grad-to) / 0.22), transparent 60%),
+    radial-gradient(closest-side at 50% 110%, hsl(var(--grad-via) / 0.22), transparent 55%),
+    linear-gradient(hsl(var(--primary) / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--primary) / 0.06) 1px, transparent 1px);
+  background-size: auto, auto, auto, 32px 32px, 32px 32px;
+}
+
+/* Legacy "gov-stripe" repurposed as the NexusVote brand gradient bar. Kept the
+   class name so existing cards don't need edits — only the colours change. */
+.gov-stripe {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--grad-from)) 0%,
+    hsl(var(--grad-via)) 50%,
+    hsl(var(--grad-to)) 100%
+  );
+}
+
+/* ---------- Glassmorphism & neon utility classes ----------------------------- */
+
+/* Frosted-glass surface — used on hero card, header, dashboard panels.
+   Falls back gracefully when backdrop-filter is unsupported (e.g. older
+   Firefox) by relying on a stronger semi-opaque background. */
+.glass {
+  background-color: hsl(var(--card) / 0.65);
+  border: 1px solid hsl(var(--border) / 0.7);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+.dark .glass {
+  background-color: hsl(var(--card) / 0.55);
+  border-color: hsl(var(--border) / 0.8);
+}
+
+/* Subtle inner-glow ring — looks like the panel itself is emitting light. */
+.neon-ring {
+  box-shadow:
+    0 0 0 1px hsl(var(--primary) / 0.25),
+    0 10px 40px -10px hsl(var(--primary) / 0.35),
+    inset 0 1px 0 hsl(var(--foreground) / 0.04);
+}
+
+/* Brand-coloured text gradient. */
+.text-gradient {
+  background: linear-gradient(
+    100deg,
+    hsl(var(--grad-from)),
+    hsl(var(--grad-via)) 55%,
+    hsl(var(--grad-to))
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* Gradient button background — Tailwind classes can't compose CSS vars cleanly,
+   so we expose this as a utility for the home-page CTA. */
+.btn-gradient {
+  background-image: linear-gradient(
+    100deg,
+    hsl(var(--grad-from)),
+    hsl(var(--grad-via)) 55%,
+    hsl(var(--grad-to))
+  );
+  color: hsl(var(--primary-foreground));
+  box-shadow: 0 10px 30px -10px hsl(var(--primary) / 0.55);
+}
+.btn-gradient:hover { filter: brightness(1.05); }
+
+/* Floating "aurora" orbs for the landing hero — lightweight (just two CSS
+   blurred circles), so they animate well on low-end devices too. */
+.aurora-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ---------- Animations (pure CSS, no JS dependency) -------------------------- */
+
+@keyframes fade-up {
+  0%   { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes scale-in {
+  0%   { transform: scale(0.6); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes draw-check { to { stroke-dashoffset: 0; } }
+@keyframes pulse-ring {
+  0%   { transform: scale(0.9); opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50%      { transform: translateY(-18px) translateX(8px); }
+}
+
+.animate-fade-up   { animation: fade-up 0.55s ease-out both; }
+.animate-fade-in   { animation: fade-in 0.5s ease-out both; }
+.animate-scale-in  { animation: scale-in 0.55s cubic-bezier(.2,.8,.2,1) both; }
+.animate-draw-check {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw-check 0.7s ease-out 0.25s forwards;
+}
+.animate-pulse-ring { animation: pulse-ring 1.6s ease-out infinite; }
+.animate-float-slow { animation: float-slow 9s ease-in-out infinite; }
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--secondary)) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* Stagger helper for lists */
+.stagger > * { opacity: 0; animation: fade-up 0.5s ease-out forwards; }
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.12s; }
+.stagger > *:nth-child(3) { animation-delay: 0.19s; }
+.stagger > *:nth-child(4) { animation-delay: 0.26s; }
+.stagger > *:nth-child(5) { animation-delay: 0.33s; }
+.stagger > *:nth-child(6) { animation-delay: 0.40s; }
+
+/* Respect users who prefer reduced motion — kill the looping animations. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-ring,
+  .animate-float-slow,
+  .shimmer { animation: none !important; }
+}
