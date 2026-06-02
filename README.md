@@ -314,6 +314,34 @@ cd express-backend && npm start
 
 ---
 
+## Deploying to Vercel (frontend only)
+
+The Next.js frontend is Vercel-ready. The Express backend + MySQL must be
+hosted elsewhere (Render, Railway, etc.) because Vercel only runs short-lived
+serverless functions, not a long-running Express server.
+
+1. Push the repo to GitHub (already done).
+2. Go to <https://vercel.com/new>, import the repo.
+3. In **Configure Project**, set **Root Directory** to `nextjs-frontend`.
+4. Leave Framework Preset as **Next.js** (auto-detected).
+5. Add the following **Environment Variables**:
+
+   | Name                              | Value                                            |
+   | --------------------------------- | ------------------------------------------------ |
+   | `NEXT_PUBLIC_API_URL`             | Public URL of your deployed Express backend, or leave the demo placeholder if backend isn't hosted. |
+   | `NEXT_PUBLIC_EMAILJS_SERVICE_ID`  | EmailJS service id (or `demo_service_id`).       |
+   | `NEXT_PUBLIC_EMAILJS_TEMPLATE_ID` | EmailJS template id (or `demo_template_id`).     |
+   | `NEXT_PUBLIC_EMAILJS_PUBLIC_KEY`  | EmailJS public key (or `demo_public_key`).       |
+   | `ADMIN_EMAIL`                     | Admin login email.                               |
+   | `ADMIN_PASSWORD`                  | Admin login password.                            |
+
+6. Click **Deploy**. Vercel runs `npm run build` and hosts the static + serverless output.
+
+> ⚠️ Without a hosted backend, the voter API calls (`verify-cnic`, `cast-vote`, etc.)
+> will fail — the landing, OTP UI, admin login form, and theming still work.
+
+---
+
 ## Frontend Highlights
 
 - **Government-portal theme** — deep-green primary, cream background, gold accent,
