@@ -49,6 +49,21 @@ export function VerifyForm() {
     setLoading(true);
     try {
       const res = await api.verifyCnic(digits);
+
+      // Catch a duplicate vote here — at CNIC entry — instead of letting the
+      // voter pick a candidate and only failing at cast time. We ask the
+      // backend whether this CNIC has already voted; if so, stop and show a
+      // clear message. (The ballot page keeps its own cast-time guard as a
+      // backstop for the offline path.)
+      const status = await api.voteStatus(res.cnic);
+      if (status.hasVoted) {
+        setError(
+          "This NIC / CNIC has already cast a vote. Each citizen may vote only once."
+        );
+        setLoading(false);
+        return;
+      }
+
       setSession({ cnic: res.cnic });
       router.push("/identity");
     } catch (err) {

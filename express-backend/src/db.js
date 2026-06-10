@@ -115,6 +115,29 @@ async function ensureDuplicateVoteGuard(pool) {
 }
 
 /**
+ * The original `votes` table predates the vote-confirmation feature and is
+ * missing the `reference_number` column the receipt/email flow needs. Same
+ * idempotent-migration pattern as the guards above: check information_schema
+ * and ALTER it in once. Existing rows get NULL; the stores fall back to a
+ * derived reference for those legacy rows so the admin view still renders.
+ */
+async function ensureVoteReferenceColumn(pool) {
+  const [rows] = await pool.query(
+    `SELECT COLUMN_NAME AS name
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME   = 'votes'
+        AND COLUMN_NAME  = 'reference_number'`
+  );
+  if (rows.length > 0) return; // already present
+
+  await pool.query(
+    `ALTER TABLE votes ADD COLUMN reference_number VARCHAR(32) AFTER candidate_id`
+  );
+  console.log("[db] votes table upgraded — added reference_number.");
+}
+
+/**
  * Seed the candidate roster the first time the table is empty.
  *
  * Your `candidates` table uses an integer auto-increment id. The
@@ -168,6 +191,7 @@ async function initDatabase() {
 
   await verifyTablesExist(pool);
   await ensureDuplicateVoteGuard(pool);
+  await ensureVoteReferenceColumn(pool);
   await seedCandidatesIfEmpty(pool);
 
   return pool;

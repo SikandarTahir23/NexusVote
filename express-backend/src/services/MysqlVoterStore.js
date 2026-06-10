@@ -1,5 +1,6 @@
 const UserStore = require("./UserStore");
 const User = require("../models/User");
+const { deriveLegacyReference } = require("../utils/referenceNumber");
 
 /**
  * MysqlVoterStore — concrete UserStore backed by the `voters` table.
@@ -106,12 +107,13 @@ class MysqlVoterStore extends UserStore {
   async activity() {
     const [rows] = await this.#pool.query(`
       SELECT v.cnic,
-             v.email          AS email,
-             v.full_name      AS name,
-             v.created_at     AS registered_at,
+             v.email                AS email,
+             v.full_name            AS name,
+             v.created_at           AS registered_at,
              votes.candidate_id,
-             c.candidate_name AS candidate_name,
-             c.party_name     AS candidate_party,
+             votes.reference_number AS reference_number,
+             c.candidate_name       AS candidate_name,
+             c.party_name           AS candidate_party,
              votes.voted_at
         FROM voters v
         LEFT JOIN votes      ON votes.voter_id     = v.id
@@ -128,12 +130,12 @@ class MysqlVoterStore extends UserStore {
       candidateName: r.candidate_name,
       candidateParty: r.candidate_party,
       votedAt: r.voted_at,
-      // Stable receipt id — derived from the timestamp + voter CNIC so
-      // two ballots cast in the same second still get distinct refs
-      // (the votes table doesn't have a dedicated reference column).
-      reference: r.voted_at
-        ? `VR-${String(r.voted_at).replace(/[^0-9]/g, "")}-${r.cnic.slice(-4)}`
-        : null,
+      // Prefer the stored reference; legacy rows (cast before the
+      // reference_number column existed) fall back to a derived ref in
+      // the same VOTE-YYYYMMDD-XXXX format. Voters who haven't cast → null.
+      reference:
+        r.reference_number ||
+        (r.voted_at ? deriveLegacyReference(r.voted_at, r.cnic) : null),
     }));
   }
 }

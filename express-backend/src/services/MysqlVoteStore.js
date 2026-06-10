@@ -1,11 +1,12 @@
 const VoteStore = require("./VoteStore");
+const { deriveLegacyReference } = require("../utils/referenceNumber");
 
 /**
  * MysqlVoteStore — concrete VoteStore backed by the `votes` table.
  *
  * Schema this class talks to:
  *   votes(id INT PK auto, voter_id INT UNIQUE,
- *         candidate_id INT, voted_at TIMESTAMP)
+ *         candidate_id INT, reference_number VARCHAR(32), voted_at TIMESTAMP)
  *
  * The API speaks CNIC (a string) and the votes table joins by integer
  * voter_id. We translate the CNIC → voters.id at the boundary, so the
@@ -62,8 +63,9 @@ class MysqlVoteStore extends VoteStore {
 
     try {
       await this.#pool.execute(
-        `INSERT INTO votes (voter_id, candidate_id) VALUES (?, ?)`,
-        [voterId, vote.getCandidateId()]
+        `INSERT INTO votes (voter_id, candidate_id, reference_number)
+         VALUES (?, ?, ?)`,
+        [voterId, vote.getCandidateId(), vote.getReference()]
       );
     } catch (err) {
       if (err && err.code === "ER_DUP_ENTRY") {
@@ -104,9 +106,10 @@ class MysqlVoteStore extends VoteStore {
    */
   async all() {
     const [rows] = await this.#pool.query(`
-      SELECT u.cnic         AS voter_cnic,
-             v.candidate_id AS candidate_id,
-             v.voted_at     AS voted_at
+      SELECT u.cnic             AS voter_cnic,
+             v.candidate_id     AS candidate_id,
+             v.reference_number AS reference_number,
+             v.voted_at         AS voted_at
         FROM votes v
         JOIN voters u ON u.id = v.voter_id
        ORDER BY v.voted_at ASC
@@ -114,10 +117,10 @@ class MysqlVoteStore extends VoteStore {
     return rows.map((r) => ({
       voterCnic: r.voter_cnic,
       candidateId: r.candidate_id,
-      // No reference column on your schema — use the vote timestamp as
-      // a stable receipt id so the existing UI's `receipt.reference`
-      // read keeps working without a UI change.
-      reference: `VR-${r.voted_at}`,
+      // Prefer the stored reference; legacy rows (cast before the
+      // reference_number column existed) fall back to a derived ref so
+      // the admin UI still has a stable receipt id to show.
+      reference: r.reference_number || deriveLegacyReference(r.voted_at, r.voter_cnic),
       timestamp: r.voted_at,
     }));
   }

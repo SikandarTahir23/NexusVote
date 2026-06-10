@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "test": "node --test src/",
     "db:check": "node src/scripts/check-db.js"
   },
   "dependencies": {

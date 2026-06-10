@@ -28,14 +28,23 @@ CREATE TABLE IF NOT EXISTS candidates (
 
 -- Votes table
 -- One row per ballot. UNIQUE on voter_id stops a voter from voting twice.
+-- reference_number is the voter-facing receipt id (format VOTE-YYYYMMDD-XXXX)
+-- emailed to the voter and shown on the success page.
 CREATE TABLE IF NOT EXISTS votes (
-  id           INT AUTO_INCREMENT PRIMARY KEY,
-  voter_id     INT UNIQUE,
-  candidate_id INT,
-  voted_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  voter_id         INT UNIQUE,
+  candidate_id     INT,
+  reference_number VARCHAR(32),
+  voted_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (voter_id)     REFERENCES voters(id),
   FOREIGN KEY (candidate_id) REFERENCES candidates(id)
 );
+
+-- Migration for databases created before the vote-confirmation feature.
+-- The backend applies this automatically on startup (see src/db.js,
+-- ensureVoteReferenceColumn) — kept here for reference / manual runs:
+--
+-- ALTER TABLE votes ADD COLUMN reference_number VARCHAR(32) AFTER candidate_id;
 
 
 -- Admins table

@@ -8,6 +8,7 @@ const KEY = "voting.session";
 export type Session = {
   cnic?: string;
   name?: string;
+  email?: string;
 };
 
 export function getSession(): Session {

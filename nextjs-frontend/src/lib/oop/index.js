@@ -20,6 +20,7 @@ export { User } from "./User.js";
 export { Admin } from "./Admin.js";
 export { Candidate } from "./Candidate.js";
 export { OTPManager, otpManager } from "./OTPManager.js";
+export { VoteEmailManager, voteEmailManager } from "./VoteEmailManager.js";
 export {
   AuthenticationManager,
   getAuthManager,

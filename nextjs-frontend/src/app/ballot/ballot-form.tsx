@@ -17,7 +17,7 @@ import { AnimatedError } from "@/components/animated-error";
 import { api, type Candidate } from "@/lib/api";
 import { getSession, setSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
-import { getAuthManager } from "@/lib/oop";
+import { getAuthManager, voteEmailManager } from "@/lib/oop";
 
 function CandidateSkeleton() {
   return (
@@ -38,6 +38,7 @@ export function BallotForm() {
   const router = useRouter();
   const [cnic, setCnic] = useState<string>("");
   const [name, setName] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +59,10 @@ export function BallotForm() {
     const s = getSession();
     setCnic(auth.cnic || s.cnic || "");
     setName(auth.name || s.name || "");
+    // Capture the email now — casting a vote resets the AuthenticationManager
+    // (clearing auth.email), so we snapshot it before that happens to send
+    // the confirmation email afterwards.
+    setEmail(auth.email || s.email || "");
     api
       .candidates()
       .then((res) => setCandidates(res.candidates))
@@ -72,6 +77,34 @@ export function BallotForm() {
     setSubmitting(true);
     try {
       const res = await api.castVote(cnic, selected);
+
+      // The vote is now recorded server-side. Send the confirmation email
+      // as a best-effort follow-up: sendConfirmation() never throws, so a
+      // mail failure can't roll back or block the successful vote — we just
+      // log it and carry the status through to the success page.
+      let mailed = false;
+      try {
+        const mail = await voteEmailManager.sendConfirmation({
+          email,
+          name,
+          referenceNumber: res.receipt.reference,
+          timestamp: res.receipt.timestamp,
+        });
+        mailed = mail.ok;
+        if (!mail.ok) {
+          // eslint-disable-next-line no-console
+          console.error(
+            "[ballot] Confirmation email not sent:",
+            mail.error || (mail.skipped ? "no email on file" : "unknown error")
+          );
+        }
+      } catch (mailErr) {
+        // Defensive — sendConfirmation is designed not to throw, but never
+        // let an email problem surface as a vote failure.
+        // eslint-disable-next-line no-console
+        console.error("[ballot] Confirmation email threw unexpectedly:", mailErr);
+      }
+
       // Wipe legacy session + AuthenticationManager so a refreshed tab
       // can't replay the receipt.
       setSession({});
@@ -81,6 +114,7 @@ export function BallotForm() {
         cid: res.receipt.candidateId,
         ts: res.receipt.timestamp,
         name,
+        mailed: mailed ? "1" : "0",
       });
       router.push(`/success?${params.toString()}`);
     } catch (err) {

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Home } from "lucide-react";
+import { Home, MailCheck, MailWarning } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -13,6 +13,10 @@ export function SuccessScreen() {
   const candidateId = params.get("cid") || "—";
   const timestamp = params.get("ts");
   const name = params.get("name") || "Voter";
+  // "1" when the confirmation email was sent (real or demo), "0" when it
+  // could not be sent. Absent on the offline path — treat as "sent" so we
+  // don't show a scary warning when email simply wasn't attempted.
+  const mailed = params.get("mailed") !== "0";
 
   const when = timestamp
     ? new Date(timestamp).toLocaleString(undefined, {
@@ -51,8 +55,11 @@ export function SuccessScreen() {
           transition={{ duration: 0.5, delay: 0.35, ease: "easeOut" }}
           className="mt-8 text-3xl md:text-4xl font-semibold tracking-tight"
         >
-          Your vote has been{" "}
-          <span className="text-gradient">successfully casted</span>.
+          <span aria-hidden className="mr-2">
+            ✅
+          </span>
+          Vote{" "}
+          <span className="text-gradient">Successfully Casted</span>
         </motion.h1>
         <motion.p
           initial={{ opacity: 0, y: 8 }}
@@ -64,15 +71,51 @@ export function SuccessScreen() {
           Your participation has been securely recorded by NexusVote.
         </motion.p>
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-3 text-left">
-          <div className="rounded-lg border border-border bg-secondary/40 p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Reference No.
-            </div>
-            <div className="mt-1 font-mono text-sm font-semibold">
-              {reference}
-            </div>
+        {/* Prominent reference number — the spec wants this front and centre. */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.6, ease: "easeOut" }}
+          className="mx-auto mt-8 max-w-sm rounded-xl border border-primary/30 bg-primary/5 p-5"
+        >
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Reference Number
           </div>
+          <div className="mt-2 font-mono text-2xl font-bold tracking-wide text-foreground">
+            {reference}
+          </div>
+        </motion.div>
+
+        {/* Confirmation-email notice. */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.7, ease: "easeOut" }}
+          className={
+            "mx-auto mt-4 flex max-w-md items-center justify-center gap-2 text-sm " +
+            (mailed ? "text-muted-foreground" : "text-gold-foreground dark:text-gold")
+          }
+        >
+          {mailed ? (
+            <>
+              <MailCheck className="h-4 w-4 text-success" />
+              <span>
+                A confirmation email has been sent to your registered email
+                address.
+              </span>
+            </>
+          ) : (
+            <>
+              <MailWarning className="h-4 w-4" />
+              <span>
+                Your vote is recorded. We couldn&apos;t send the confirmation
+                email — keep your reference number above for your records.
+              </span>
+            </>
+          )}
+        </motion.div>
+
+        <div className="mt-8 grid gap-3 sm:grid-cols-2 text-left">
           <div className="rounded-lg border border-border bg-secondary/40 p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
               Candidate ID
@@ -83,7 +126,7 @@ export function SuccessScreen() {
           </div>
           <div className="rounded-lg border border-border bg-secondary/40 p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Cast At
+              Date &amp; Time
             </div>
             <div className="mt-1 text-sm font-semibold">{when}</div>
           </div>

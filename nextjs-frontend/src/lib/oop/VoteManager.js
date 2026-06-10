@@ -1,4 +1,5 @@
 import { Candidate } from "./Candidate.js";
+import { generateReferenceNumber } from "./referenceNumber.js";
 
 /**
  * VoteManager — owns the candidate registry, vote tallying, and the
@@ -197,11 +198,9 @@ export class VoteManager {
   /** Build a tamper-evident-looking reference number + full receipt. */
   #issueReceipt({ cnic, email, name, candidateId }) {
     const ts = new Date();
-    const ref =
-      "EC-" +
-      ts.getFullYear() +
-      "-" +
-      Math.random().toString(36).slice(2, 8).toUpperCase();
+    // Same canonical format as the backend (VOTE-YYYYMMDD-XXXX) so the
+    // offline path is indistinguishable from the online one downstream.
+    const ref = generateReferenceNumber({ date: ts });
     return {
       reference: ref,
       candidateId,
@@ -284,11 +283,7 @@ export class VoteManager {
       this.#voted.add(cnic);
       const ts = new Date(now - mins * 60_000);
       this.#log.push({
-        reference:
-          "EC-" +
-          ts.getFullYear() +
-          "-" +
-          Math.random().toString(36).slice(2, 8).toUpperCase(),
+        reference: generateReferenceNumber({ date: ts }),
         candidateId: cid,
         candidateName: this.#candidates.get(cid).name,
         voterCnic: cnic,
