@@ -13,10 +13,16 @@ import { Admin } from "./Admin.js";
  * and ENCAPSULATION (the live `Admin` instance is private; callers read it
  * through the getter).
  *
- * Verification of credentials happens **server-side** in
- * `src/app/api/admin/login/route.ts` so the password is never bundled into
- * the browser. This class is the thin client-side facade in front of it.
+ * Verification of credentials happens **server-side** in the Express
+ * backend (`POST /api/admin/login`), which returns a bearer token. The
+ * token is held privately here and attached to every admin API request
+ * via the `token` getter — the password itself is never stored anywhere.
  */
+
+const API_BASE = (
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
+).replace(/\/$/, "");
+
 export class AdminAuthManager {
   static #STORAGE_KEY = "voting.admin";
 
@@ -24,6 +30,8 @@ export class AdminAuthManager {
   #admin = null;
   /** @type {number} */
   #loggedInAt = 0;
+  /** @type {string | null} */
+  #token = null;
 
   constructor() {
     this.#hydrate();
@@ -38,6 +46,11 @@ export class AdminAuthManager {
 
   get isLoggedIn() {
     return this.#admin !== null;
+  }
+
+  /** Bearer token for the Express admin API, or null when signed out. */
+  get token() {
+    return this.#token;
   }
 
   get loggedInAt() {
@@ -63,9 +76,10 @@ export class AdminAuthManager {
   // ---- Operations -------------------------------------------------------
 
   /**
-   * Attempt to sign in. POSTs to the server route which checks the
-   * credentials against env vars. Returns `{ ok }` on success, throws on
-   * network failure, returns `{ ok: false, reason }` on rejection.
+   * Attempt to sign in. POSTs to the Express backend, which checks the
+   * credentials (admins table, falling back to env vars) and issues the
+   * bearer token used by every admin API call. Returns `{ ok }` on
+   * success, `{ ok: false, reason }` on rejection or network failure.
    *
    * @param {string} email
    * @param {string} password
@@ -74,7 +88,7 @@ export class AdminAuthManager {
   async login(email, password) {
     let res;
     try {
-      res = await fetch("/api/admin/login", {
+      res = await fetch(`${API_BASE}/admin/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -93,10 +107,10 @@ export class AdminAuthManager {
       return { ok: false, reason: "Unexpected server response." };
     }
 
-    if (!res.ok || !data?.ok) {
+    if (!res.ok || !data?.success || !data?.token) {
       return {
         ok: false,
-        reason: data?.reason || "Invalid administrator credentials.",
+        reason: data?.message || "Invalid administrator credentials.",
       };
     }
 
@@ -107,14 +121,27 @@ export class AdminAuthManager {
       name: data.profile?.name || "Platform Administrator",
       department: data.profile?.department || "NexusVote Operations",
     });
+    this.#token = data.token;
     this.#loggedInAt = Date.now();
     this.#persist();
     return { ok: true };
   }
 
-  /** End the admin session. */
+  /**
+   * End the admin session. Tells the backend to revoke the token
+   * (best-effort — local state is cleared regardless).
+   */
   logout() {
+    if (this.#token) {
+      fetch(`${API_BASE}/admin/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.#token}` },
+      }).catch(() => {
+        /* backend down — token dies with it anyway */
+      });
+    }
     this.#admin = null;
+    this.#token = null;
     this.#loggedInAt = 0;
     if (typeof window !== "undefined") {
       try {
@@ -137,6 +164,7 @@ export class AdminAuthManager {
           name: this.#admin.name,
           department: this.#admin.department,
           loggedInAt: this.#loggedInAt,
+          token: this.#token,
         })
       );
     } catch {
@@ -156,6 +184,7 @@ export class AdminAuthManager {
         name: data.name,
         department: data.department || "NexusVote Operations",
       });
+      this.#token = typeof data.token === "string" ? data.token : null;
       this.#loggedInAt = Number(data.loggedInAt) || Date.now();
     } catch {
       // Corrupt payload — start anonymous.

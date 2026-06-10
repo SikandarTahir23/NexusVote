@@ -8,10 +8,10 @@ import {
   Search,
   LogOut,
   Users,
+  UserCheck,
+  UserCog,
   Vote as VoteIcon,
   RefreshCw,
-  TrendingUp,
-  Activity,
   Clock,
   AlertTriangle,
 } from "lucide-react";
@@ -68,7 +68,12 @@ export function DashboardShell() {
 
   const [admin, setAdmin] = useState<AdminSnapshot | null>(null);
   const [rows, setRows] = useState<VoterRow[]>([]);
-  const [totals, setTotals] = useState({ totalVotes: 0, totalCandidates: 0 });
+  const [totals, setTotals] = useState({
+    totalVotes: 0,
+    totalCandidates: 0,
+    activeCandidates: 0,
+    totalVoters: 0,
+  });
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [search, setSearch] = useState("");
   const [candidateFilter, setCandidateFilter] = useState("");
@@ -134,17 +139,27 @@ export function DashboardShell() {
         setRows(nextRows);
         setTotals({
           totalVotes: statsRes.totalVotes,
-          totalCandidates: nextCandidates.length,
+          totalCandidates: statsRes.totalCandidates ?? nextCandidates.length,
+          activeCandidates:
+            statsRes.activeCandidates ??
+            statsRes.byCandidate.filter((c) => c.status === "active").length,
+          totalVoters: statsRes.totalVoters ?? 0,
         });
         setLoadError(null);
       } catch (err) {
-        if (!cancelled) {
-          setLoadError(
-            err instanceof Error
-              ? err.message
-              : "Could not reach the backend."
-          );
+        if (cancelled) return;
+        // Token expired or backend restarted (in-memory sessions) — force
+        // a clean re-login instead of erroring every 2 s forever.
+        if (err instanceof Error && err.name === "AdminUnauthorized") {
+          getAdminAuthManager().logout();
+          router.replace("/admin/login");
+          return;
         }
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : "Could not reach the backend."
+        );
       } finally {
         if (!cancelled) setRefreshing(false);
       }
@@ -190,10 +205,19 @@ export function DashboardShell() {
       setRows(nextRows);
       setTotals({
         totalVotes: statsRes.totalVotes,
-        totalCandidates: nextCandidates.length,
+        totalCandidates: statsRes.totalCandidates ?? nextCandidates.length,
+        activeCandidates:
+          statsRes.activeCandidates ??
+          statsRes.byCandidate.filter((c) => c.status === "active").length,
+        totalVoters: statsRes.totalVoters ?? 0,
       });
       setLoadError(null);
     } catch (err) {
+      if (err instanceof Error && err.name === "AdminUnauthorized") {
+        getAdminAuthManager().logout();
+        router.replace("/admin/login");
+        return;
+      }
       setLoadError(
         err instanceof Error ? err.message : "Could not reach the backend."
       );
@@ -286,6 +310,14 @@ export function DashboardShell() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => router.push("/admin/candidates")}
+          >
+            <UserCog className="h-4 w-4" />
+            Manage Candidates
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={refreshNow}
             disabled={refreshing}
             aria-label="Refresh now"
@@ -329,29 +361,33 @@ export function DashboardShell() {
         className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
       >
         <StatCard
-          icon={<VoteIcon className="h-5 w-5" />}
-          label="Total Votes"
-          value={totals.totalVotes}
+          icon={<Users className="h-5 w-5" />}
+          label="Total Candidates"
+          value={totals.totalCandidates}
           accent="from-indigo-500 to-violet-500"
         />
         <StatCard
+          icon={<UserCheck className="h-5 w-5" />}
+          label="Active Candidates"
+          value={totals.activeCandidates}
+          accent="from-emerald-500 to-teal-500"
+        />
+        <StatCard
           icon={<Users className="h-5 w-5" />}
-          label="Candidates"
-          value={totals.totalCandidates}
+          label="Total Voters"
+          value={totals.totalVoters}
           accent="from-violet-500 to-fuchsia-500"
         />
         <StatCard
-          icon={<TrendingUp className="h-5 w-5" />}
-          label="Leader Votes"
-          value={votesByCandidate[0]?.count ?? 0}
-          subtitle={votesByCandidate[0]?.name}
+          icon={<VoteIcon className="h-5 w-5" />}
+          label="Total Votes Cast"
+          value={totals.totalVotes}
+          subtitle={
+            votesByCandidate[0]?.count
+              ? `Leader: ${votesByCandidate[0]?.name}`
+              : undefined
+          }
           accent="from-fuchsia-500 to-pink-500"
-        />
-        <StatCard
-          icon={<Activity className="h-5 w-5" />}
-          label="Showing"
-          value={filteredRows.length}
-          accent="from-blue-500 to-indigo-500"
         />
       </motion.div>
 

@@ -15,6 +15,8 @@ const MysqlVoteStore = require("./services/MysqlVoteStore");
 const MysqlVoterStore = require("./services/MysqlVoterStore");
 const MysqlCandidateService = require("./services/MysqlCandidateService");
 const MysqlAdminStore = require("./services/MysqlAdminStore");
+const AdminSessionService = require("./services/AdminSessionService");
+const CandidateManager = require("./services/CandidateManager");
 
 const PORT = process.env.PORT || 5000;
 
@@ -34,6 +36,8 @@ async function bootstrap() {
 
   const voteManager = new VoteManager(voteStore, candidates);
   const authService = new AuthenticationService(userStore, adminStore);
+  const adminSessions = new AdminSessionService();
+  const candidateManager = new CandidateManager(pool);
 
   // 3. Build the Express app and expose services via app.locals so
   //    controllers can pull them off req.app.locals.services. We expose
@@ -42,6 +46,12 @@ async function bootstrap() {
   const app = express();
   app.use(cors());
   app.use(express.json());
+
+  // Candidate symbol images uploaded through the admin panel. Served at
+  // the root (not under /api) so the stored "/uploads/<file>" paths
+  // resolve as http://localhost:5000/uploads/<file>.
+  app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+
   app.locals.services = {
     voteManager,
     authService,
@@ -49,6 +59,8 @@ async function bootstrap() {
     userStore,
     voteStore,
     adminStore,
+    adminSessions,
+    candidateManager,
   };
 
   app.get("/", (_req, res) => {
@@ -63,8 +75,14 @@ async function bootstrap() {
         "POST /api/cast-vote",
         "GET  /api/vote-status/:cnic",
         "POST /api/admin/login",
+        "POST /api/admin/logout",
         "GET  /api/admin/stats",
         "GET  /api/admin/voters",
+        "GET  /api/admin/candidates",
+        "GET  /api/admin/candidates/:id",
+        "POST /api/admin/candidates",
+        "PUT  /api/admin/candidates/:id",
+        "DELETE /api/admin/candidates/:id",
       ],
     });
   });

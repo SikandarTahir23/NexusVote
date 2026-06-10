@@ -4,8 +4,8 @@ const Candidate = require("../models/Candidate");
  * MysqlCandidateService — reads the candidate roster from MySQL.
  *
  * Schema this class talks to:
- *   candidates(id INT PK auto, candidate_name, party_name,
- *              symbol_image, total_votes)
+ *   candidates(id INT PK auto, candidate_name, party_name, symbol_image,
+ *              total_votes, description, status, created_at, updated_at)
  *
  * Party color isn't stored in the DB (the design treats it as a UI
  * concern), so we keep a small palette here keyed by party name. New
@@ -15,8 +15,13 @@ const Candidate = require("../models/Candidate");
  * (findAll, findById) so VoteManager and candidateController only need
  * to learn how to `await`.
  *
+ * Note: an earlier revision cached the roster for the process lifetime.
+ * Now that admins can create/edit/delete candidates at runtime (see
+ * CandidateManager) a stale cache would serve ghosts on the ballot, so
+ * every call hits MySQL — the table is a handful of rows, reads are cheap.
+ *
  * OOP concepts demonstrated:
- *  - ENCAPSULATION: pool + cache are private.
+ *  - ENCAPSULATION: the pool is private.
  *  - ABSTRACTION: callers ask for candidates by id; the persistence
  *    layer is invisible.
  */
@@ -30,54 +35,64 @@ const PARTY_COLORS = {
 };
 const DEFAULT_COLOR = "#475569"; // slate-600
 
+/** Build a Candidate model instance from a candidates table row. */
+function rowToCandidate(r) {
+  return new Candidate({
+    id: r.id, // integer — the UI just echoes it back, doesn't parse it
+    name: r.candidate_name,
+    party: r.party_name,
+    partyColor: PARTY_COLORS[r.party_name] || DEFAULT_COLOR,
+    symbol: r.symbol_image,
+    description: r.description,
+    status: r.status || "active",
+    totalVotes: r.total_votes || 0,
+    createdAt: r.created_at || null,
+    updatedAt: r.updated_at || null,
+  });
+}
+
 class MysqlCandidateService {
   #pool;
-  #cache = null;
 
   constructor(pool) {
     this.#pool = pool;
   }
 
   /**
-   * Load + cache the roster. The candidates table is seeded once and
-   * never mutated at runtime (total_votes is bumped but that's not
-   * read here), so caching for the lifetime of the process is fine.
+   * The full roster, oldest first. Pass `{ activeOnly: true }` to get
+   * just the candidates that should appear on the voter ballot.
    */
-  async #load() {
-    if (this.#cache) return this.#cache;
+  async findAll({ activeOnly = false } = {}) {
     const [rows] = await this.#pool.query(
-      `SELECT id, candidate_name, party_name, symbol_image
-         FROM candidates ORDER BY id ASC`
+      `SELECT id, candidate_name, party_name, symbol_image, total_votes,
+              description, status, created_at, updated_at
+         FROM candidates
+        ${activeOnly ? "WHERE status = 'active'" : ""}
+        ORDER BY id ASC`
     );
-    this.#cache = rows.map(
-      (r) =>
-        new Candidate({
-          id: r.id, // integer — the UI just echoes it back, doesn't parse it
-          name: r.candidate_name,
-          party: r.party_name,
-          partyColor: PARTY_COLORS[r.party_name] || DEFAULT_COLOR,
-          symbol: r.symbol_image,
-        })
-    );
-    return this.#cache;
-  }
-
-  async findAll() {
-    const list = await this.#load();
-    return [...list];
+    return rows.map(rowToCandidate);
   }
 
   /**
-   * Look up a single candidate. We accept the id loosely (string or
+   * Look up a single candidate regardless of status (callers decide
+   * whether inactive matters). We accept the id loosely (string or
    * number) because the JSON body coming off the API parses ids as
-   * whatever JSON.parse gives us — coerce to number for comparison.
+   * whatever JSON.parse gives us — coerce to number for the query.
    */
   async findById(candidateId) {
     const id = Number(candidateId);
     if (!Number.isFinite(id)) return null;
-    const list = await this.#load();
-    return list.find((c) => c.getId() === id) || null;
+    const [rows] = await this.#pool.execute(
+      `SELECT id, candidate_name, party_name, symbol_image, total_votes,
+              description, status, created_at, updated_at
+         FROM candidates WHERE id = ?`,
+      [id]
+    );
+    return rows.length > 0 ? rowToCandidate(rows[0]) : null;
   }
 }
 
 module.exports = MysqlCandidateService;
+module.exports.rowToCandidate = rowToCandidate;
+module.exports.PARTY_COLORS = PARTY_COLORS;
+module.exports.DEFAULT_COLOR = DEFAULT_COLOR;

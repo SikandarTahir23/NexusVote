@@ -12,7 +12,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CandidateSymbol } from "@/components/candidate-symbol";
+import { CandidateSymbol, isImageSymbol } from "@/components/candidate-symbol";
 import { AnimatedError } from "@/components/animated-error";
 import { api, type Candidate } from "@/lib/api";
 import { getSession, setSession } from "@/lib/session";
@@ -208,7 +208,10 @@ export function BallotForm() {
               </div>
               <div className="mt-5 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
-                  Symbol: <span className="font-medium">{c.symbol}</span>
+                  Symbol:{" "}
+                  <span className="font-medium">
+                    {isImageSymbol(c.symbol) ? "official image" : c.symbol}
+                  </span>
                 </span>
                 <span>ID: {c.id}</span>
               </div>

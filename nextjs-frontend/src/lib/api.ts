@@ -24,7 +24,12 @@
  * Set NEXT_PUBLIC_API_URL in `.env.local` (defaults to localhost:5000).
  */
 
-import { getAuthManager, getVoteManager, User } from "@/lib/oop";
+import {
+  getAuthManager,
+  getVoteManager,
+  getAdminAuthManager,
+  User,
+} from "@/lib/oop";
 
 export type Candidate = {
   id: string;
@@ -32,6 +37,16 @@ export type Candidate = {
   party: string;
   partyColor: string;
   symbol: string;
+};
+
+/** Full candidate record as the admin endpoints return it. */
+export type AdminCandidate = Candidate & {
+  id: number;
+  description: string | null;
+  status: "active" | "inactive";
+  totalVotes: number;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 export type VoteReceipt = {
@@ -48,19 +63,35 @@ const API_BASE =
   );
 
 /**
+ * Origin of the Express backend without the /api suffix — used to build
+ * absolute URLs for uploaded candidate symbol images, which are served
+ * at <origin>/uploads/<file>.
+ */
+export const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+
+/**
  * Thin fetch wrapper — JSON-in, JSON-out, throws on non-2xx with the
  * server's `message` field if present. Centralised so every endpoint
  * gets the same error shape and the same Content-Type handling.
+ *
+ * FormData bodies (candidate image uploads) skip the JSON Content-Type —
+ * the browser must set its own multipart boundary header.
+ *
+ * A 401 from an /admin path throws an error named "AdminUnauthorized" so
+ * the admin shells can distinguish "session expired → re-login" from
+ * ordinary failures.
  */
 async function request<T>(
   path: string,
   init: RequestInit & { json?: unknown } = {}
 ): Promise<T> {
   const { json, headers, ...rest } = init;
+  const isFormData =
+    typeof FormData !== "undefined" && init.body instanceof FormData;
   const res = await fetch(`${API_BASE}${path}`, {
     ...rest,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(headers || {}),
     },
     body: json !== undefined ? JSON.stringify(json) : init.body,
@@ -82,9 +113,23 @@ async function request<T>(
         typeof (payload as { message: unknown }).message === "string"
         ? (payload as { message: string }).message
         : null) || `Request failed with status ${res.status}`;
-    throw new Error(message);
+    const error = new Error(message);
+    if (res.status === 401 && path.startsWith("/admin")) {
+      error.name = "AdminUnauthorized";
+    }
+    throw error;
   }
   return payload as T;
+}
+
+/**
+ * Authorization header for admin endpoints — reads the bearer token the
+ * AdminAuthManager received at login. Centralised so the 2s dashboard
+ * polling and the candidate CRUD calls all stay in sync.
+ */
+function adminHeaders(): Record<string, string> {
+  const token = getAdminAuthManager().token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export const api = {
@@ -256,18 +301,23 @@ export const api = {
 
   // ── Admin endpoints ─────────────────────────────────────────────────────
   //
-  // The admin dashboard currently reads from the local OOP DashboardManager
-  // and isn't rewired here on purpose — touching the UI is out of scope.
-  // These helpers are exported so future dashboard work has a clean path
-  // to swap to live DB data without inventing a new transport layer.
+  // All of these (except login) require the bearer token issued by
+  // POST /admin/login — adminHeaders() attaches it automatically. A 401
+  // surfaces as an "AdminUnauthorized" error the shells catch to force a
+  // re-login (tokens are in-memory server-side and die on restart).
 
-  /** Tallies + percentages for the admin panel. */
+  /** Tallies + percentages + headline counts for the admin panel. */
   async stats() {
     return request<{
       success: boolean;
       totalVotes: number;
-      byCandidate: Array<Candidate & { votes: number; percentage: number }>;
-    }>("/admin/stats");
+      totalVoters: number;
+      totalCandidates: number;
+      activeCandidates: number;
+      byCandidate: Array<
+        Candidate & { status?: string; votes: number; percentage: number }
+      >;
+    }>("/admin/stats", { headers: adminHeaders() });
   },
 
   /** Voter activity feed (registered voters + their vote status). */
@@ -286,18 +336,83 @@ export const api = {
         votedAt: string | null;
         reference: string | null;
       }>;
-    }>("/admin/voters");
+    }>("/admin/voters", { headers: adminHeaders() });
   },
 
   /**
-   * Admin login against the Express backend. The Next.js route at
-   * `/api/admin/login` is still in place and is what `AdminAuthManager`
-   * calls today — this method is here for future migration.
+   * Admin login against the Express backend. `AdminAuthManager` calls the
+   * backend directly (it owns token persistence); this helper exists for
+   * completeness / scripting.
    */
   async adminLogin(email: string, password: string) {
     return request<{
       success: boolean;
+      token: string;
       profile: { email: string; name: string; department: string; role: string };
     }>("/admin/login", { method: "POST", json: { email, password } });
+  },
+
+  /** Revoke the current admin session token. */
+  async adminLogout() {
+    return request<{ success: boolean }>("/admin/logout", {
+      method: "POST",
+      headers: adminHeaders(),
+    });
+  },
+
+  // ── Admin candidate management (CRUD) ───────────────────────────────────
+
+  /** All candidates (admin view, with live vote counts + status). */
+  async adminCandidates(status?: "active" | "inactive") {
+    const qs = status ? `?status=${status}` : "";
+    return request<{ success: boolean; candidates: AdminCandidate[] }>(
+      `/admin/candidates${qs}`,
+      { headers: adminHeaders() }
+    );
+  },
+
+  /** One candidate by id. */
+  async adminCandidate(id: number) {
+    return request<{ success: boolean; candidate: AdminCandidate }>(
+      `/admin/candidates/${id}`,
+      { headers: adminHeaders() }
+    );
+  },
+
+  /**
+   * Create a candidate. `form` carries name/party/description/status plus
+   * either a `symbolImage` file or a `symbolEmoji` text field.
+   */
+  async createCandidate(form: FormData) {
+    return request<{
+      success: boolean;
+      message: string;
+      candidate: AdminCandidate;
+    }>("/admin/candidates", {
+      method: "POST",
+      headers: adminHeaders(),
+      body: form,
+    });
+  },
+
+  /** Update a candidate — same FormData shape as createCandidate. */
+  async updateCandidate(id: number, form: FormData) {
+    return request<{
+      success: boolean;
+      message: string;
+      candidate: AdminCandidate;
+    }>(`/admin/candidates/${id}`, {
+      method: "PUT",
+      headers: adminHeaders(),
+      body: form,
+    });
+  },
+
+  /** Delete a candidate. 409 if they've received votes (caught by UI). */
+  async deleteCandidate(id: number) {
+    return request<{ success: boolean; message: string }>(
+      `/admin/candidates/${id}`,
+      { method: "DELETE", headers: adminHeaders() }
+    );
   },
 };

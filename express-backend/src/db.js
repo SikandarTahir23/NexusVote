@@ -138,6 +138,40 @@ async function ensureVoteReferenceColumn(pool) {
 }
 
 /**
+ * The original `candidates` table predates the admin candidate-management
+ * feature and is missing the columns it needs (description, status,
+ * created_at, updated_at). Like ensureDuplicateVoteGuard above, this is
+ * an idempotent startup migration: check information_schema for what's
+ * missing and ALTER it in once. Existing rows pick up status='active'
+ * via the column DEFAULT, so the live ballot is unaffected.
+ */
+async function ensureCandidateColumns(pool) {
+  const [rows] = await pool.query(
+    `SELECT COLUMN_NAME AS name
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME   = 'candidates'`
+  );
+  const present = new Set(rows.map((r) => r.name.toLowerCase()));
+
+  const wanted = [
+    ["description", "ADD COLUMN description TEXT NULL"],
+    ["status", "ADD COLUMN status ENUM('active','inactive') NOT NULL DEFAULT 'active'"],
+    ["created_at", "ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"],
+    ["updated_at", "ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"],
+  ];
+  const missing = wanted.filter(([col]) => !present.has(col));
+  if (missing.length === 0) return; // already up to date
+
+  await pool.query(
+    `ALTER TABLE candidates ${missing.map(([, ddl]) => ddl).join(", ")}`
+  );
+  console.log(
+    `[db] candidates table upgraded — added: ${missing.map(([c]) => c).join(", ")}`
+  );
+}
+
+/**
  * Seed the candidate roster the first time the table is empty.
  *
  * Your `candidates` table uses an integer auto-increment id. The
@@ -192,6 +226,7 @@ async function initDatabase() {
   await verifyTablesExist(pool);
   await ensureDuplicateVoteGuard(pool);
   await ensureVoteReferenceColumn(pool);
+  await ensureCandidateColumns(pool);
   await seedCandidatesIfEmpty(pool);
 
   return pool;

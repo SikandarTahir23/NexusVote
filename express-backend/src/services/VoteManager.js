@@ -33,6 +33,11 @@ class VoteManager {
     if (!candidate) {
       throw new Error("Unknown candidate.");
     }
+    // An admin may deactivate a candidate while a voter still has an old
+    // ballot open — reject the vote here rather than trust the UI.
+    if (typeof candidate.isActive === "function" && !candidate.isActive()) {
+      throw new Error("This candidate is not accepting votes.");
+    }
     if (await this.#store.hasVoted(voterCnic)) {
       throw new Error("You have already cast your vote.");
     }

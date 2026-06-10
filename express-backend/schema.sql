@@ -1,3 +1,4 @@
+
 -- Database schema for the voting system
 -- Run this in MySQL Workbench once before starting the backend.
 
@@ -17,13 +18,29 @@ CREATE TABLE IF NOT EXISTS voters (
 
 
 -- Candidates table
+-- symbol_image holds either an emoji ("📚") or an uploaded image path
+-- ("/uploads/symbol-....png") served statically by the Express backend.
 CREATE TABLE IF NOT EXISTS candidates (
   id             INT AUTO_INCREMENT PRIMARY KEY,
   candidate_name VARCHAR(255),
   party_name     VARCHAR(255),
   symbol_image   VARCHAR(255),
-  total_votes    INT DEFAULT 0
+  total_votes    INT DEFAULT 0,
+  description    TEXT NULL,
+  status         ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- Migration for databases created before the candidate-management feature.
+-- The backend applies this automatically on startup (see src/db.js,
+-- ensureCandidateColumns) — kept here for reference / manual runs:
+--
+-- ALTER TABLE candidates
+--   ADD COLUMN description TEXT NULL,
+--   ADD COLUMN status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+--   ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+--   ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
 
 
 -- Votes table
