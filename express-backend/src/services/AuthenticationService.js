@@ -55,8 +55,12 @@ class AuthenticationService {
   /**
    * Step 2 of the flow: persist the user's display name against their CNIC.
    * Returns the User instance (idempotent — UPSERT updates name if called twice).
+   *
+   * `email` is optional — captured client-side at the OTP step and passed
+   * through so the Excel backup can populate its Email column. It is never
+   * required and never affects CNIC validation or vote eligibility.
    */
-  async registerUser({ cnic, name }) {
+  async registerUser({ cnic, name, email }) {
     if (!this.isValidCnicFormat(cnic)) {
       throw new Error("Invalid CNIC.");
     }
@@ -65,7 +69,7 @@ class AuthenticationService {
     }
     const canonical = this.normalizeCnic(cnic);
     const user = new User({ cnic: canonical, name: name.trim() });
-    return this.#userStore.upsert(user);
+    return this.#userStore.upsert(user, email);
   }
 
   async getUser(cnic) {

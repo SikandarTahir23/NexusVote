@@ -31,14 +31,46 @@ class MysqlVoterStore extends UserStore {
   /**
    * Insert-or-update by CNIC. Returns the User the caller passed in so
    * the controller can ship it straight back to the UI.
+   *
+   * `email` is optional and best-effort: it's captured client-side at the
+   * OTP step and threaded through so the Excel backup has a populated Email
+   * column. The voters.email column has a UNIQUE constraint, so the same
+   * email arriving under a different CNIC would throw ER_DUP_ENTRY — we
+   * retry without the email rather than fail registration over a backup
+   * nicety. Voter identity is the CNIC; email is supplementary.
    */
-  async upsert(user) {
-    await this.#pool.execute(
-      `INSERT INTO voters (cnic, full_name)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)`,
-      [user.getCnic(), user.getName()]
-    );
+  async upsert(user, email = null) {
+    const cnic = user.getCnic();
+    const name = user.getName();
+    const cleanEmail =
+      typeof email === "string" && email.trim() ? email.trim() : null;
+
+    try {
+      await this.#pool.execute(
+        `INSERT INTO voters (cnic, full_name, email)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           full_name = VALUES(full_name),
+           email     = COALESCE(VALUES(email), email)`,
+        [cnic, name, cleanEmail]
+      );
+    } catch (err) {
+      if (err && err.code === "ER_DUP_ENTRY") {
+        // Almost certainly the UNIQUE(email) guard. Re-run without the email
+        // so the name still persists and registration succeeds.
+        console.error(
+          `[voters] email "${cleanEmail}" already in use — saving voter without it.`
+        );
+        await this.#pool.execute(
+          `INSERT INTO voters (cnic, full_name)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)`,
+          [cnic, name]
+        );
+      } else {
+        throw err;
+      }
+    }
     return user;
   }
 

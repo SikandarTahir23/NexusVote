@@ -21,9 +21,11 @@ exports.verifyCnic = (req, res) => {
 
 exports.saveUser = async (req, res) => {
   const { authService } = req.app.locals.services;
-  const { cnic, name } = req.body || {};
+  // email is optional — supplied so the Excel backup has a populated Email
+  // column. Absent/empty is fine; registration only needs cnic + name.
+  const { cnic, name, email } = req.body || {};
   try {
-    const user = await authService.registerUser({ cnic, name });
+    const user = await authService.registerUser({ cnic, name, email });
     return res.json({ success: true, user: user.toJSON() });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });

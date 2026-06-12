@@ -175,6 +175,12 @@ export const api = {
     auth.setCnic(cnic);
     auth.setName(name);
 
+    // The voter's email was captured at the /auth/email step and lives in
+    // the AuthenticationManager. Forward it so the backend can persist it on
+    // the voter row (it powers the Email column in the admin Excel backup).
+    // Optional — an empty value is harmless and registration never needs it.
+    const email = auth.email || undefined;
+
     try {
       const res = await request<{
         success: boolean;
@@ -184,7 +190,7 @@ export const api = {
           constituency: string;
           role: string;
         };
-      }>("/save-user", { method: "POST", json: { cnic, name } });
+      }>("/save-user", { method: "POST", json: { cnic, name, email } });
       return { success: true as const, user: res.user };
     } catch (err) {
       return {
@@ -414,5 +420,56 @@ export const api = {
       `/admin/candidates/${id}`,
       { method: "DELETE", headers: adminHeaders() }
     );
+  },
+
+  // ── Backup management ───────────────────────────────────────────────────
+
+  /** Health of the automatic Excel/Drive backup (admin-only). */
+  async backupStatus() {
+    return request<{
+      success: boolean;
+      status: {
+        lastBackupTime: string | null;
+        totalRecords: number;
+        driveStatus: "synced" | "not_configured" | "error" | "pending";
+        driveFileId: string | null;
+        driveConfigured: boolean;
+        fileExists: boolean;
+        lastError: string | null;
+      };
+    }>("/admin/backup/status", { headers: adminHeaders() });
+  },
+
+  /**
+   * Download votes_backup.xlsx. A plain <a href> can't carry the bearer
+   * token the admin API requires, so we fetch the file as a blob with the
+   * auth header and trigger a client-side object-URL download.
+   */
+  async downloadBackup() {
+    const res = await fetch(`${API_BASE}/admin/backup/download`, {
+      headers: adminHeaders(),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let message = `Download failed (status ${res.status}).`;
+      try {
+        const body = await res.json();
+        if (body && typeof body.message === "string") message = body.message;
+      } catch {
+        /* non-JSON (e.g. the binary file on success) — keep default */
+      }
+      const error = new Error(message);
+      if (res.status === 401) error.name = "AdminUnauthorized";
+      throw error;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "votes_backup.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   },
 };

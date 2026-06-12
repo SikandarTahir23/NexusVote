@@ -14,6 +14,10 @@ import {
   RefreshCw,
   Clock,
   AlertTriangle,
+  Database,
+  Download,
+  Cloud,
+  CloudOff,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,6 +40,15 @@ type AdminSnapshot = {
   displayName: string;
   department: string;
   loggedInAt: number;
+};
+
+type BackupStatus = {
+  lastBackupTime: string | null;
+  totalRecords: number;
+  driveStatus: "synced" | "not_configured" | "error" | "pending";
+  driveConfigured: boolean;
+  fileExists: boolean;
+  lastError: string | null;
 };
 
 /**
@@ -75,6 +88,7 @@ export function DashboardShell() {
     totalVoters: 0,
   });
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [backup, setBackup] = useState<BackupStatus | null>(null);
   const [search, setSearch] = useState("");
   const [candidateFilter, setCandidateFilter] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,11 +114,15 @@ export function DashboardShell() {
     async function refresh() {
       setRefreshing(true);
       try {
-        const [statsRes, votersRes] = await Promise.all([
+        // Backup status is supplementary — a failure there must not blank
+        // the whole dashboard, so it resolves to null instead of throwing.
+        const [statsRes, votersRes, backupRes] = await Promise.all([
           api.stats(),
           api.voters(),
+          api.backupStatus().catch(() => null),
         ]);
         if (cancelled) return;
+        if (backupRes) setBackup(backupRes.status);
 
         // Map the backend candidate shape onto the UI shape — only thing
         // to fix is the id, which is INT on the wire and string in the UI
@@ -178,11 +196,37 @@ export function DashboardShell() {
     router.replace("/admin/login");
   }
 
+  // Download the Excel backup. Errors (no file yet, expired session) surface
+  // in the same connectivity banner the rest of the dashboard uses.
+  const [downloading, setDownloading] = useState(false);
+  async function onDownloadBackup() {
+    setDownloading(true);
+    try {
+      await api.downloadBackup();
+    } catch (err) {
+      if (err instanceof Error && err.name === "AdminUnauthorized") {
+        getAdminAuthManager().logout();
+        router.replace("/admin/login");
+        return;
+      }
+      setLoadError(
+        err instanceof Error ? err.message : "Could not download the backup."
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   /** Trigger a one-off refresh outside the polling loop (Refresh button). */
   async function refreshNow() {
     setRefreshing(true);
     try {
-      const [statsRes, votersRes] = await Promise.all([api.stats(), api.voters()]);
+      const [statsRes, votersRes, backupRes] = await Promise.all([
+        api.stats(),
+        api.voters(),
+        api.backupStatus().catch(() => null),
+      ]);
+      if (backupRes) setBackup(backupRes.status);
       const nextCandidates: Candidate[] = statsRes.byCandidate.map((c) => ({
         id: String(c.id),
         name: c.name,
@@ -400,6 +444,19 @@ export function DashboardShell() {
       >
         <CandidateBreakdown rows={votesByCandidate} total={totals.totalVotes} />
         <RecentActivity rows={recentActivity} candidateById={candidateById} />
+      </motion.div>
+
+      {/* Backup management — Excel + Google Drive sync health */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, delay: 0.09 }}
+      >
+        <BackupManagement
+          backup={backup}
+          downloading={downloading}
+          onDownload={onDownloadBackup}
+        />
       </motion.div>
 
       {/* Filter row */}
@@ -637,6 +694,123 @@ function RecentActivity({
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * Backup Management — surfaces the health of the automatic Excel + Google
+ * Drive backup. All data comes from GET /admin/backup/status (polled every
+ * 2 s alongside the rest of the dashboard). The download button pulls
+ * votes_backup.xlsx through the authenticated api.downloadBackup() helper.
+ */
+function BackupManagement({
+  backup,
+  downloading,
+  onDownload,
+}: {
+  backup: BackupStatus | null;
+  downloading: boolean;
+  onDownload: () => void;
+}) {
+  // Map the three meaningful Drive states onto an icon + label + color.
+  const drive = (() => {
+    const status = backup?.driveStatus;
+    if (status === "synced")
+      return {
+        icon: <Cloud className="h-4 w-4" />,
+        label: "Synced",
+        cls: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30",
+      };
+    if (status === "error")
+      return {
+        icon: <AlertTriangle className="h-4 w-4" />,
+        label: "Sync error",
+        cls: "bg-destructive/10 text-destructive border-destructive/30",
+      };
+    // not_configured | pending | undefined
+    return {
+      icon: <CloudOff className="h-4 w-4" />,
+      label: backup?.driveConfigured ? "Pending" : "Not configured",
+      cls: "bg-muted text-muted-foreground border-border",
+    };
+  })();
+
+  return (
+    <div className="rounded-2xl border border-border glass p-5 shadow-md shadow-primary/5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-md">
+            <Database className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold">Backup Management</h2>
+            <p className="text-xs text-muted-foreground">
+              Excel backup &amp; Google Drive sync.
+            </p>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onDownload}
+          disabled={downloading || !backup?.fileExists}
+          title={
+            backup?.fileExists
+              ? "Download votes_backup.xlsx"
+              : "No backup file yet — cast a vote to generate one."
+          }
+        >
+          <Download className={`h-4 w-4 ${downloading ? "animate-pulse" : ""}`} />
+          {downloading ? "Preparing…" : "Download Excel"}
+        </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <BackupMetric
+          label="Last Backup"
+          value={
+            backup?.lastBackupTime
+              ? formatRelative(backup.lastBackupTime)
+              : "Never"
+          }
+        />
+        <BackupMetric
+          label="Records Exported"
+          value={String(backup?.totalRecords ?? 0)}
+        />
+        <div className="space-y-1.5">
+          <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Drive Sync
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${drive.cls}`}
+          >
+            {drive.icon}
+            {drive.label}
+          </span>
+        </div>
+      </div>
+
+      {backup?.driveStatus === "error" && backup.lastError && (
+        <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Drive sync failed: {backup.lastError}. The local Excel backup is still
+          up to date.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BackupMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        {label}
+      </div>
+      <div className="text-lg font-semibold tabular-nums tracking-tight truncate">
+        {value}
+      </div>
     </div>
   );
 }

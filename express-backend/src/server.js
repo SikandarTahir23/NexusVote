@@ -17,6 +17,9 @@ const MysqlCandidateService = require("./services/MysqlCandidateService");
 const MysqlAdminStore = require("./services/MysqlAdminStore");
 const AdminSessionService = require("./services/AdminSessionService");
 const CandidateManager = require("./services/CandidateManager");
+const ExcelExportService = require("./services/excelExportService");
+const DriveService = require("./services/driveService");
+const BackupManager = require("./utils/generateExcelBackup");
 
 const PORT = process.env.PORT || 5000;
 
@@ -38,6 +41,26 @@ async function bootstrap() {
   const authService = new AuthenticationService(userStore, adminStore);
   const adminSessions = new AdminSessionService();
   const candidateManager = new CandidateManager(pool);
+
+  // Automatic Excel backup + Google Drive sync. Wired here so it shares the
+  // same pool and follows the same DI style as everything else. The backup
+  // is invoked fire-and-forget from the vote controller AFTER a vote is
+  // committed, so none of this can ever block or roll back a vote.
+  const backupDir = process.env.BACKUP_DIR
+    ? path.resolve(__dirname, "..", process.env.BACKUP_DIR)
+    : path.join(__dirname, "..", "data");
+  const excelService = new ExcelExportService({ backupDir });
+  const driveService = new DriveService({
+    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE || null,
+    folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || null,
+    fileId: process.env.GOOGLE_DRIVE_FILE_ID || null,
+    backupDir,
+  });
+  const backup = new BackupManager({
+    voteStore,
+    excelService,
+    driveService,
+  });
 
   // 3. Build the Express app and expose services via app.locals so
   //    controllers can pull them off req.app.locals.services. We expose
@@ -61,6 +84,7 @@ async function bootstrap() {
     adminStore,
     adminSessions,
     candidateManager,
+    backup,
   };
 
   app.get("/", (_req, res) => {
@@ -83,6 +107,8 @@ async function bootstrap() {
         "POST /api/admin/candidates",
         "PUT  /api/admin/candidates/:id",
         "DELETE /api/admin/candidates/:id",
+        "GET  /api/admin/backup/status",
+        "GET  /api/admin/backup/download",
       ],
     });
   });

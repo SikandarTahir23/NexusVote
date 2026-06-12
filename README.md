@@ -31,6 +31,7 @@ but never rolls back or blocks the vote.
 | Frontend | Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · lucide-react |
 | Backend  | Node.js · Express 4 · Object-Oriented JavaScript (ES2022 classes)           |
 | Database | MySQL 8 via `mysql2/promise` connection pool                                |
+| Backup   | Excel export (`xlsx`) + Google Drive sync (`googleapis`, Service Account)    |
 | Auth     | EmailJS one-time-passcode delivery · in-memory OTP manager · admin session  |
 | Anim.    | Framer Motion page transitions + Tailwind / CSS keyframe utilities          |
 
@@ -117,6 +118,86 @@ PORT=5000
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=admin123
 ```
+
+---
+
+## Automatic Excel Backup + Google Drive Sync
+
+Every time a vote is successfully committed to MySQL, the backend **also**
+rebuilds an Excel workbook (`votes_backup.xlsx`) from the live database and
+uploads it to Google Drive. This is a redundant, human-readable audit copy —
+it never blocks or rolls back a vote.
+
+**Failure isolation:** the backup runs *fire-and-forget* in
+[`voteController.castVote`](express-backend/src/controllers/voteController.js)
+**after** the vote is persisted. If the Excel write or the Drive upload fails,
+the vote remains saved in MySQL and (where possible) the local `.xlsx` is still
+written. A Google Drive outage only downgrades the dashboard's sync badge.
+
+**Flow:** vote committed → `BackupManager.run()` →
+`MysqlVoteStore.allForBackup()` (joined query) →
+`ExcelExportService` writes `data/votes_backup.xlsx` →
+`DriveService` creates/updates the Drive file → status recorded + logged.
+
+### Excel columns
+
+| Reference Number | Voter Name | CNIC | Email | Candidate Name | Party Name | Vote Timestamp |
+| ---------------- | ---------- | ---- | ----- | -------------- | ---------- | -------------- |
+
+> The **Email** column is populated from `voters.email`, which the
+> [`/save-user`](express-backend/src/controllers/authController.js) step now
+> persists (captured client-side at the OTP screen). `voters.email` already
+> existed in the schema, so **no database migration is required**.
+
+### Files
+
+```
+express-backend/src/
+├── services/excelExportService.js   ← writes votes_backup.xlsx (xlsx lib)
+├── services/driveService.js         ← Google Drive upload/update (googleapis)
+└── utils/generateExcelBackup.js     ← BackupManager — orchestrates the cycle
+```
+
+### Setup
+
+```bash
+cd express-backend
+npm install            # xlsx + googleapis are already in package.json
+```
+
+Drive sync is **optional** — with no credentials configured the local Excel
+backup still runs and the dashboard shows Drive status *Not configured*. To
+enable Drive:
+
+1. Create a Google Cloud **Service Account**, enable the **Drive API**, and
+   download its JSON key to `express-backend/credentials/service-account.json`.
+2. Share the destination Drive folder with the service account's
+   `client_email`.
+3. Set the env vars in `express-backend/.env`:
+
+```env
+GOOGLE_SERVICE_ACCOUNT_KEY_FILE=./credentials/service-account.json
+GOOGLE_DRIVE_FOLDER_ID=        # optional; folder to create the file in
+GOOGLE_DRIVE_FILE_ID=          # optional seed; first upload remembers its own id
+BACKUP_DIR=./data
+```
+
+> The Drive file id is persisted to `data/backup-state.json` after the first
+> upload so subsequent votes **update the same file** instead of creating
+> duplicates (a running process can't rewrite its own `.env`).
+
+`data/` and `credentials/` are gitignored — neither the backup nor the
+service-account key is ever committed.
+
+### Admin backup endpoints (require the admin bearer token)
+
+| Method | Path                          | Purpose                                   |
+| ------ | ----------------------------- | ----------------------------------------- |
+| GET    | `/api/admin/backup/status`    | Last backup time, record count, Drive status. |
+| GET    | `/api/admin/backup/download`  | Streams `votes_backup.xlsx`.              |
+
+The admin dashboard renders a **Backup Management** card from these — last
+backup time, total records exported, Drive sync badge, and a Download button.
 
 ---
 

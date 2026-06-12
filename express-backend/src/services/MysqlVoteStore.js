@@ -124,6 +124,41 @@ class MysqlVoteStore extends VoteStore {
       timestamp: r.voted_at,
     }));
   }
+
+  /**
+   * Fully-denormalised vote rows for the Excel/Drive backup. Unlike all()
+   * this joins in the voter's name/email and the candidate's name/party so
+   * the spreadsheet is human-readable without any further lookups.
+   *
+   * INNER JOINs on both sides: a backup row only makes sense when the vote
+   * still references a live voter and candidate. Each returned object maps
+   * 1:1 to a spreadsheet row (the column labels are applied in
+   * ExcelExportService).
+   */
+  async allForBackup() {
+    const [rows] = await this.#pool.query(`
+      SELECT v.reference_number AS reference_number,
+             u.full_name        AS voter_name,
+             u.cnic             AS cnic,
+             u.email            AS email,
+             c.candidate_name   AS candidate_name,
+             c.party_name       AS party_name,
+             v.voted_at         AS voted_at
+        FROM votes v
+        JOIN voters     u ON u.id = v.voter_id
+        JOIN candidates c ON c.id = v.candidate_id
+       ORDER BY v.voted_at ASC
+    `);
+    return rows.map((r) => ({
+      reference: r.reference_number || deriveLegacyReference(r.voted_at, r.cnic),
+      voterName: r.voter_name,
+      cnic: r.cnic,
+      email: r.email,
+      candidateName: r.candidate_name,
+      partyName: r.party_name,
+      timestamp: r.voted_at,
+    }));
+  }
 }
 
 module.exports = MysqlVoteStore;

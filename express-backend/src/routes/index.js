@@ -62,6 +62,11 @@ router.put(
 );
 router.delete("/admin/candidates/:id", adminCandidateController.destroy);
 
+// Backup management — Excel/Drive backup health + download. Admin-only
+// (sits under the requireAdmin guard mounted above).
+router.get("/admin/backup/status", adminController.backupStatus);
+router.get("/admin/backup/download", adminController.downloadBackup);
+
 // ── Error handler ─────────────────────────────────────────────────────────
 //
 // Multer throws on oversized or wrong-type uploads *before* the route

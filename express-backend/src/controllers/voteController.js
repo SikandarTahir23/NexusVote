@@ -1,5 +1,5 @@
 exports.castVote = async (req, res) => {
-  const { voteManager, authService } = req.app.locals.services;
+  const { voteManager, authService, backup } = req.app.locals.services;
   const { cnic, candidateId } = req.body || {};
   if (!cnic || !candidateId) {
     return res.status(400).json({
@@ -18,6 +18,13 @@ exports.castVote = async (req, res) => {
       voterCnic: verification.cnic,
       candidateId,
     });
+
+    // Fire-and-forget Excel + Google Drive backup. Intentionally NOT awaited:
+    // the vote is already committed to MySQL above, so a slow or failing
+    // backup must never delay the voter's response or roll the vote back.
+    // Any error is swallowed here and recorded in the backup status.
+    backup?.run().catch((e) => console.error("[backup] run failed:", e));
+
     return res.json({
       success: true,
       message: "Your vote has been successfully casted.",

@@ -82,3 +82,44 @@ exports.voters = async (req, res) => {
       .json({ success: false, message: "Could not load voter activity." });
   }
 };
+
+/**
+ * GET /api/admin/backup/status — health of the automatic Excel/Drive backup.
+ *
+ * Returns last backup time, exported record count, Google Drive sync state,
+ * and whether the local .xlsx currently exists. Admin-only (this whole
+ * surface sits behind requireAdmin).
+ */
+exports.backupStatus = (req, res) => {
+  const { backup } = req.app.locals.services;
+  if (!backup) {
+    return res
+      .status(503)
+      .json({ success: false, message: "Backup service is not available." });
+  }
+  return res.json({ success: true, status: backup.getStatus() });
+};
+
+/**
+ * GET /api/admin/backup/download — stream votes_backup.xlsx to the admin.
+ *
+ * 404s cleanly if no vote has been cast yet (the file is created lazily on
+ * the first successful vote).
+ */
+exports.downloadBackup = (req, res) => {
+  const { backup } = req.app.locals.services;
+  if (!backup) {
+    return res
+      .status(503)
+      .json({ success: false, message: "Backup service is not available." });
+  }
+  const filePath = backup.getFilePath();
+  return res.download(filePath, "votes_backup.xlsx", (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({
+        success: false,
+        message: "No backup file yet — cast a vote to generate one.",
+      });
+    }
+  });
+};
